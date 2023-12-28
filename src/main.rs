@@ -3,12 +3,9 @@
 #![allow(dead_code)]
 
 use std::io::{self, Write, stdout, Stdout};
-use std::ops::Not;
 use crossterm::{
     QueueableCommand,
-    cursor,
-    execute,
-    queue,
+    cursor, execute, queue,
     style,
     style::{Color, Attribute, Attributes, Print},
     terminal::{enable_raw_mode, size, Clear, ClearType},
@@ -64,30 +61,18 @@ impl Buffer {
 
     fn render(&mut self) -> io::Result<()> {
         self.write.queue(Clear(ClearType::All))?;
-        self.write.queue(cursor::MoveTo(0, 0))?;
 
-        let mut foreground = Color::White;
-        let mut background = Color::Black;
+        for update in self.updates.iter() {
+            if 
+                update.cell.bg != Color::Black {
+                    self.write.queue(style::SetBackgroundColor(update.cell.bg))?; 
+                }
+            else if
+                update.cell.fg != Color::White {
+                    self.write.queue(style::SetForegroundColor(update.cell.fg))?; 
+                }
 
-        for update in &self.updates {
-            let index = update.index;
-            let cell  = &self.cells[index];
-
-            self.write.queue(cursor::MoveTo(
-                    (index as u16) % self.dims.0,
-                    (index as u16) / self.dims.0,
-                    ))?;
-            if foreground != cell.fg {
-                foreground = cell.fg;
-                self.write.queue(style::SetForegroundColor(foreground))?;
-            }
-
-            if background != cell.bg {
-                background = cell.bg;
-                self.write.queue(style::SetBackgroundColor(background))?;
-            }
-
-            self.write.queue(Print(cell.cchar))?;
+            self.write.queue(Print(update.cell.cchar))?; 
         }
 
         self.updates.clear();
@@ -102,38 +87,16 @@ fn main() -> io::Result<()> {
 
     let mut buff = Buffer::default();
 
-    for _ in 0..5 {
-        for i in 0..buff.cells.len() {
-            let x = (i as u16) % buff.dims.0;
-            let y = (i as u16) / buff.dims.0;
-
-            let fg_color = match i % 3 {
-                0 => Color::Red,
-                1 => Color::Green,
-                _ => Color::Blue,
-            };
-
-            let bg_color = Color::Black;
-
-            let cell_char = match i % 4 {
-                0 => 'A',
-                1 => 'B',
-                2 => 'C',
-                _ => 'D',
-            };
-
-            buff.add_update(
-                Cell {
-                    cchar: cell_char,
-                    fg:    fg_color,
-                    bg:    bg_color,
-                    attr:  Attribute::Reset.into()
-                }, i
-                );
-        }
-
-        buff.render()?;
+    for i in 0..buff.cells.len() {
+        buff.add_update(Cell {
+            cchar: ['A', 'B', 'C', 'D'][i % 4],
+            fg:    [Color::Red, Color::Green, Color::Blue][i % 3],
+            bg:    Color::Black,
+            attr:  Attribute::Reset.into()
+        }, i);
     }
+
+    buff.render()?;
 
     std::thread::sleep(std::time::Duration::from_secs(5));
 
