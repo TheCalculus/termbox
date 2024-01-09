@@ -2,18 +2,26 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
 
-use std::io::{self, Write, stdout, Stdout};
+use std::{
+//  error::Error,
+    io::{self, Write, stdout, Stdout},
+    thread::sleep,
+    time::{Duration, Instant},
+};
+
 use crossterm::{
     QueueableCommand,
     cursor, execute, queue,
     style,
     style::{Color, Attribute, Attributes, Print},
-    terminal::{enable_raw_mode, size, Clear, ClearType},
+    terminal::{enable_raw_mode, disable_raw_mode, size, Clear, ClearType},
 };
+
+use rand::Rng;
 
 #[derive(Clone)]
 struct Cell {
-    cchar: char,
+    ch:    char,
     fg:    Color,
     bg:    Color,
     attr:  Attributes,
@@ -26,12 +34,8 @@ struct Update {
 
 impl Cell {
     fn default() -> Self {
-        Self {
-            cchar: ' ',
-            fg:    Color::White,
-            bg:    Color::Black,
-            attr:  Attribute::Reset.into(),
-        }
+        Self { ch: ' ',          fg:   Color::White, 
+               bg: Color::Black, attr: Attribute::Reset.into() }
     }
 }
 
@@ -55,24 +59,36 @@ impl Buffer {
         }
     }
 
-    fn add_update(&mut self, cell: Cell, index: usize) {
+    fn update_cell(&mut self, cell: Cell, index: usize) {
         self.updates.push(Update { cell, index });
     }
 
+    fn update_contiguous_cells(&mut self, index: usize, chars: Vec<char>, fg: Color, bg: Color) {
+        // TODO: automatic wrap-to-next-line magic
+        for (i, &ch) in chars.iter().enumerate() {
+            self.update_cell(Cell { ch, fg,
+                bg, attr: Attribute::Reset.into() }, index + i);
+        }
+    }
+
     fn render(&mut self) -> io::Result<()> {
-        self.write.queue(Clear(ClearType::All))?;
+        if self.updates.len() == 0 { return Ok(()); }
 
         for update in self.updates.iter() {
-            if 
-                update.cell.bg != Color::Black {
-                    self.write.queue(style::SetBackgroundColor(update.cell.bg))?; 
-                }
-            else if
-                update.cell.fg != Color::White {
-                    self.write.queue(style::SetForegroundColor(update.cell.fg))?; 
-                }
+            let x = (update.index as u16) / self.dims.0;
+            let y = (update.index as u16) % self.dims.0;
 
-            self.write.queue(Print(update.cell.cchar))?; 
+            self.write.queue(cursor::MoveTo(y, x));
+
+            if update.cell.bg != Color::Black {
+                self.write.queue(style::SetBackgroundColor(update.cell.bg))?; 
+            }
+
+            if update.cell.fg != Color::White {
+                self.write.queue(style::SetForegroundColor(update.cell.fg))?; 
+            }
+
+            self.write.queue(Print(update.cell.ch))?; 
         }
 
         self.updates.clear();
@@ -82,23 +98,51 @@ impl Buffer {
     }
 }
 
+fn purge(buff: &mut Buffer) -> io::Result<()> {
+    buff.write.queue(Clear(ClearType::Purge))?;
+    buff.write.flush()?;
+    Ok(())
+}
+
 fn main() -> io::Result<()> {
     enable_raw_mode()?;
-
+   
     let mut buff = Buffer::default();
+    let mut prev = Instant::now();
+
+    purge(&mut buff)?;
+
+    let target_frametime = Duration::from_secs_f64(1.0 / 30.0);
 
     for i in 0..buff.cells.len() {
-        buff.add_update(Cell {
-            cchar: ['A', 'B', 'C', 'D'][i % 4],
+        buff.update_cell(Cell {
+            ch:    ['A', 'B', 'C', 'D'][i % 4],
             fg:    [Color::Red, Color::Green, Color::Blue][i % 3],
             bg:    Color::Black,
             attr:  Attribute::Reset.into()
         }, i);
     }
 
-    buff.render()?;
+    for a in 0..600 {
+//  loop {
+        let curr  = Instant::now();
+        let delta = curr.duration_since(prev);
+ 
+        if delta < target_frametime {
+            sleep(target_frametime - delta);
+            continue;
+        }
+  
+        prev = curr;
+        
+        buff.update_cell(Cell { ch: 'e', fg: Color::Red, bg: Color::Black, attr: Attribute::Reset.into() },
+            rand::thread_rng().gen_range(0..buff.cells.len()));
+        buff.update_contiguous_cells(0, rand::thread_rng().gen_range(100..buff.cells.len()).to_string().as_str().chars().collect(), Color::DarkRed, Color::Black);
+  
+        buff.render()?;
+    }
 
-    std::thread::sleep(std::time::Duration::from_secs(5));
-
+    purge(&mut buff)?;
+    disable_raw_mode()?;
     Ok(()) 
 }
