@@ -11,8 +11,8 @@ use std::{
 
 use crossterm::{
     QueueableCommand,
-    cursor, execute, queue,
-    style,
+    cursor, execute, queue, style,
+    event::{poll, read, Event, KeyCode, KeyEvent},
     style::{Color, Attribute, Attributes, Print},
     terminal::{enable_raw_mode, disable_raw_mode, size, Clear, ClearType},
 };
@@ -104,6 +104,8 @@ fn purge(buff: &mut Buffer) -> io::Result<()> {
     Ok(())
 }
 
+const target_frametime = Duration::from_secs_f64(1.0 / 30.0);
+
 fn main() -> io::Result<()> {
     enable_raw_mode()?;
    
@@ -112,33 +114,30 @@ fn main() -> io::Result<()> {
 
     purge(&mut buff)?;
 
-    let target_frametime = Duration::from_secs_f64(1.0 / 30.0);
+    let mut running = true;
+    while running {
+        let curr = Instant::now();
+        let delt = curr.duration_since(prev);
 
-    for i in 0..buff.cells.len() {
-        buff.update_cell(Cell {
-            ch:    ['A', 'B', 'C', 'D'][i % 4],
-            fg:    [Color::Red, Color::Green, Color::Blue][i % 3],
-            bg:    Color::Black,
-            attr:  Attribute::Reset.into()
-        }, i);
-    }
-
-    for a in 0..600 {
-//  loop {
-        let curr  = Instant::now();
-        let delta = curr.duration_since(prev);
- 
-        if delta < target_frametime {
-            sleep(target_frametime - delta);
+        if delt < target_frametime {
+            sleep(target_frametime - delt);
             continue;
         }
-  
+
         prev = curr;
-        
-        buff.update_cell(Cell { ch: 'e', fg: Color::Red, bg: Color::Black, attr: Attribute::Reset.into() },
-            rand::thread_rng().gen_range(0..buff.cells.len()));
+
+        while poll(Duration::ZERO)? {
+            // handle only key events
+            if let Event::Key(event) = read() {
+                match event.code {
+                    KeyCode::Esc => running = false,
+                    _ => {},
+                }
+            }
+        }
+
+        buff.update_cell(Cell { ch: 'e', fg: Color::Red, bg: Color::Black, attr: Attribute::Reset.into() }, rand::thread_rng().gen_range(0..buff.cells.len()));
         buff.update_contiguous_cells(0, rand::thread_rng().gen_range(100..buff.cells.len()).to_string().as_str().chars().collect(), Color::DarkRed, Color::Black);
-  
         buff.render()?;
     }
 
