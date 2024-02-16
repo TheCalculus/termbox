@@ -81,11 +81,13 @@ impl Buffer {
             self.write.queue(cursor::MoveTo(y, x));
 
             if update.cell.bg != Color::Black {
-                self.write.queue(style::SetBackgroundColor(update.cell.bg))?; 
+                self.write
+                    .queue(style::SetBackgroundColor(update.cell.bg))?;
             }
 
             if update.cell.fg != Color::White {
-                self.write.queue(style::SetForegroundColor(update.cell.fg))?; 
+                self.write
+                    .queue(style::SetForegroundColor(update.cell.fg))?; 
             }
 
             self.write.queue(Print(update.cell.ch))?; 
@@ -98,19 +100,33 @@ impl Buffer {
     }
 }
 
+#[derive(PartialEq)]
+enum CursorMode {
+    Normal,
+    Insert,
+    Visual,
+}
+
+struct Client {
+    cursor:  (u16, u16),
+    mode:    CursorMode,
+}
+
 fn purge(buff: &mut Buffer) -> io::Result<()> {
     buff.write.queue(Clear(ClearType::Purge))?;
     buff.write.flush()?;
     Ok(())
 }
 
-const target_frametime = Duration::from_secs_f64(1.0 / 30.0);
+const TARGET_FRAMETIME: Duration = Duration::from_millis(33);
 
 fn main() -> io::Result<()> {
     enable_raw_mode()?;
    
     let mut buff = Buffer::default();
     let mut prev = Instant::now();
+
+    let mut client = Client { cursor: (0, 0), mode: CursorMode::Visual };
 
     purge(&mut buff)?;
 
@@ -119,8 +135,8 @@ fn main() -> io::Result<()> {
         let curr = Instant::now();
         let delt = curr.duration_since(prev);
 
-        if delt < target_frametime {
-            sleep(target_frametime - delt);
+        if delt < TARGET_FRAMETIME {
+            sleep(TARGET_FRAMETIME - delt);
             continue;
         }
 
@@ -128,9 +144,24 @@ fn main() -> io::Result<()> {
 
         while poll(Duration::ZERO)? {
             // handle only key events
-            if let Event::Key(event) = read() {
+            if let Ok(Event::Key(event)) = read() {
                 match event.code {
-                    KeyCode::Esc => running = false,
+                    KeyCode::Char('i') => {
+                        if client.mode == CursorMode::Normal { 
+                            client.mode = CursorMode::Insert
+                        }
+                    },
+                    KeyCode::Char('v') => {
+                        if client.mode == CursorMode::Normal { 
+                            client.mode = CursorMode::Visual
+                        }
+                    },
+                    KeyCode::Char('j') => client.cursor.1 += 1,
+                    KeyCode::Char('k') => client.cursor.1 -= 1,
+                    KeyCode::Char('l') => client.cursor.0 += 1,
+                    KeyCode::Char('h') => client.cursor.0 -= 1,
+                    KeyCode::Char(':') => running     = false,
+                    KeyCode::Esc       => client.mode = CursorMode::Normal,
                     _ => {},
                 }
             }
